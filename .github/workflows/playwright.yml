@@ -2,7 +2,7 @@ name: Playwright Tests
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 7 * * mon"
+    - cron: "0 7 * * mon,wed,fri"
 
 jobs:
   test:
