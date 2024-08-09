@@ -9,15 +9,26 @@ test("grab auth token and fetch games through api", async ({ page }) => {
 
   await page.goto(scheduleBaseUrl);
 
+  // page.on("console", (msg) => {
+  //   console.log(msg);
+  // });
+
   // ASHL > Ontario > Etobicoke -> redirects to current (or next season when in playoffs)
   await page.getByRole("button", { name: "ASHL" }).click();
   await page.getByRole("button", { name: "Ontario" }).click();
   await page.getByRole("link", { name: "CWENCH Centre - Etobicoke" }).click();
 
+  // Wait for session_token_iframe to be set in localStorage
+  await page.waitForTimeout(3000);
+
   const games = await page.evaluate(async () => {
     // TODO: can pull this by listening the the page's request to /v1/organizations...
     const organizationId = "F3iSbnnOrSALJPRs"; // seems to be static, represents Etobicoke's arena
-    const seasonNames = ["2024 Summer", "2024 Summer Playoffs"];
+    const seasonNames = [
+      "2024 Summer",
+      "2024 Summer Playoffs",
+      "2024/25 Winter",
+    ];
     const teamName = "Big City Boys";
     const dayOfWeek = "Monday";
 
@@ -30,6 +41,7 @@ test("grab auth token and fetch games through api", async ({ page }) => {
     async function sendRequest(url) {
       try {
         const bearerToken = localStorage.getItem("session_token_iframe");
+
         console.log(`fetching ${url}`);
 
         const res = await fetch(url, {
@@ -40,7 +52,6 @@ test("grab auth token and fetch games through api", async ({ page }) => {
         });
 
         const responseBody = await res.json();
-        console.log(responseBody);
 
         return responseBody?.data;
       } catch (err) {
