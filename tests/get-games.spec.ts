@@ -3,16 +3,25 @@ import ical from "ical-generator";
 import fs from "fs";
 
 test("grab auth token and fetch games through api", async ({ page }) => {
-  const calendarName = "ASHL Big City Boys S24";
-  const iCalFileName = "S24";
-  const seasonUrl =
-    "https://www.ashl.ca/stats-and-schedules/ashl/etobicoke-summer/#/schedule/JvdZbRKnsoK1pAQo";
+  const calendarName = "ASHL Big City Boys";
+  const iCalFileName = "V1.0.0";
+  const scheduleBaseUrl = "https://www.ashl.ca/stats-schedules/";
 
-  await page.goto(seasonUrl);
+  await page.goto(scheduleBaseUrl);
+
+  // ASHL > Ontario > Etobicoke -> redirects to current (or next season when in playoffs)
+  await page.getByRole("button", { name: "ASHL" }).click();
+  await page.getByRole("button", { name: "Ontario" }).click();
+  await page.getByRole("link", { name: "CWENCH Centre - Etobicoke" }).click();
 
   const games = await page.evaluate(async () => {
-    const schedulesUrl =
-      "https://canlan2-api.sportninja.net/v1/organizations/F3iSbnnOrSALJPRs/schedules?sort=starts_at&direction=desc";
+    // TODO: can pull this by listening the the page's request to /v1/organizations...
+    const organizationId = "F3iSbnnOrSALJPRs"; // seems to be static, represents Etobicoke's arena
+    const seasonNames = ["2024 Summer", "2024 Summer Playoffs"];
+    const teamName = "Big City Boys";
+    const dayOfWeek = "Monday";
+
+    const schedulesUrl = `https://canlan2-api.sportninja.net/v1/organizations/${organizationId}/schedules?sort=starts_at&direction=desc`;
     const seasonDetailsUrl = (seasonId) =>
       `https://canlan2-api.sportninja.net/v1/schedules/${seasonId}/children/dropdown`;
     const gamesUrl = (conferenceId, teamId) =>
@@ -39,36 +48,39 @@ test("grab auth token and fetch games through api", async ({ page }) => {
       }
     }
 
-    async function getGames(
-      seasonName = "2024 Summer",
-      teamName = "Big City Boys",
-      dayOfWeek = "Monday"
-    ) {
+    async function getGames() {
+      let games: Array<any> = [];
+
+      // The schedule just contains a list of each season
       const schedules = await sendRequest(schedulesUrl);
-      const seasonId = schedules.find((item) => item.name === seasonName)?.id;
 
-      // dropdown contains current season, conference and team division info. Including team id
-      const currentSeasonDetailsUrl = seasonDetailsUrl(seasonId);
-      const seasonDetails = await sendRequest(currentSeasonDetailsUrl);
+      for (let seasonName of seasonNames) {
+        const seasonId = schedules.find((item) => item.name === seasonName)?.id;
 
-      const conferenceId = seasonDetails
-        .find((item) => item.name === "Conference")
-        ?.schedules.find((s) => s.name === dayOfWeek)?.id;
-      let teamId;
+        // dropdown contains current season, conference and team division info. Including team id
+        const currentSeasonDetailsUrl = seasonDetailsUrl(seasonId);
+        const seasonDetails = await sendRequest(currentSeasonDetailsUrl);
 
-      // If your team, like ours, bounces around divisions. Find team across all divisions
-      seasonDetails
-        .find((item) => item.name === "Division")
-        ?.schedules.forEach((division) => {
-          division.teams?.forEach((team) => {
-            if (team.name === teamName) {
-              teamId = team.id;
-            }
+        const conferenceId = seasonDetails
+          .find((item) => item.name === "Conference")
+          ?.schedules.find((s) => s.name === dayOfWeek)?.id;
+        let teamId;
+
+        // If your team, like ours, bounces around divisions. Find team across all divisions
+        seasonDetails
+          .find((item) => item.name === "Division")
+          ?.schedules.forEach((division) => {
+            division.teams?.forEach((team) => {
+              if (team.name === teamName) {
+                teamId = team.id;
+              }
+            });
           });
-        });
 
-      const ourGamesUrl = gamesUrl(conferenceId, teamId);
-      const games = await sendRequest(ourGamesUrl);
+        const ourGamesUrl = gamesUrl(conferenceId, teamId);
+        const gamesForSeason = await sendRequest(ourGamesUrl);
+        games = [...games, ...gamesForSeason];
+      }
 
       return games;
     }
