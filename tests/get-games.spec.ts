@@ -9,9 +9,16 @@ test("grab auth token and fetch games through api", async ({ page }) => {
 
   await page.goto(scheduleBaseUrl);
 
+  // // uncomment to display all logs
   // page.on("console", (msg) => {
   //   console.log(msg);
   // });
+
+  page.on("console", (message) => {
+    if (message.type() === "info") {
+      console.log(message);
+    }
+  });
 
   // ASHL > Ontario > Etobicoke -> redirects to current (or next season when in playoffs)
   await page.getByRole("button", { name: "ASHL" }).click();
@@ -42,7 +49,7 @@ test("grab auth token and fetch games through api", async ({ page }) => {
       try {
         const bearerToken = localStorage.getItem("session_token_iframe");
 
-        console.log(`fetching ${url}`);
+        console.info(`fetching ${url}`);
 
         const res = await fetch(url, {
           headers: {
@@ -102,13 +109,15 @@ test("grab auth token and fetch games through api", async ({ page }) => {
   const calendar = ical({ name: calendarName });
 
   games.forEach((game) => {
+    // console.info(game);
     const gameId = game.id;
     const startTime = new Date(game.starts_at);
     let endTime = new Date(game.starts_at);
     endTime.setHours(endTime.getHours() + 1);
 
-    const homeTeam = game.homeTeam.name;
-    const visitingTeam = game.visitingTeam.name;
+    const homeTeam = game.homeTeam?.name || game.homeTeamSlot?.name_full;
+    const visitingTeam =
+      game.visitingTeam?.name || game.visitingTeamSlot?.name_full;
     const venue = game.venue.name;
     const facility = game.facility.name;
     const streetAddress = game.venue.address.street_1;
