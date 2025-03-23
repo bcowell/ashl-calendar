@@ -3,9 +3,13 @@ import ical from "ical-generator";
 import fs from "fs";
 
 test("grab auth token and fetch games through api", async ({ page }) => {
-  const calendarName = "ASHL Big City Boys";
-  const iCalFileName = "V1.0.0";
-  const scheduleBaseUrl = "https://www.ashl.ca/stats-schedules/";
+  const calendarName = process.env.CALENDAR_NAME || "ASHL Big City Boys";
+  const iCalFileName = process.env.ICAL_FILE_NAME || "V1.0.0";
+  const scheduleBaseUrl =
+    process.env.SCHEDULE_BASE_URL || "https://www.ashl.ca/stats-schedules/";
+
+  const teamName = process.env.TEAM_NAME || "Big City Boys";
+  const dayOfWeek = process.env.DAY_OF_WEEK || "Monday";
 
   await page.goto(scheduleBaseUrl);
 
@@ -14,11 +18,11 @@ test("grab auth token and fetch games through api", async ({ page }) => {
   //   console.log(msg);
   // });
 
-  page.on("console", (message) => {
-    if (message.type() === "info") {
-      console.log(message);
-    }
-  });
+  // page.on("console", (message) => {
+  //   if (message.type() === "info") {
+  //     console.log(message);
+  //   }
+  // });
 
   // ASHL > Ontario > Etobicoke -> redirects to current (or next season when in playoffs)
   await page.getByRole("button", { name: "ASHL" }).click();
@@ -28,88 +32,102 @@ test("grab auth token and fetch games through api", async ({ page }) => {
   // Wait for session_token_iframe to be set in localStorage
   await page.waitForTimeout(3000);
 
-  const games = await page.evaluate(async () => {
-    // TODO: can pull this by listening the the page's request to /v1/organizations...
-    const organizationId = "F3iSbnnOrSALJPRs"; // seems to be static, represents Etobicoke's arena
-    const seasonNames = [
-      "2024 Summer",
-      "2024 Summer Playoffs",
-      "2024/25 Winter",
-    ];
-    const teamName = "Big City Boys";
-    const dayOfWeek = "Monday";
+  const games = await page.evaluate(
+    async ([teamName, dayOfWeek]) => {
+      // TODO: can pull this by listening the the page's request to /v1/organizations...
+      const organizationId = "F3iSbnnOrSALJPRs"; // seems to be static, represents Etobicoke's arena
+      const seasonNames = [
+        "2024 Summer",
+        "2024 Summer Playoffs",
+        "2024/25 Winter",
+        "2024/25 Winter Playoffs",
+        "2025 Summer",
+        "2025 Summer Playoffs",
+      ];
 
-    const schedulesUrl = `https://canlan2-api.sportninja.net/v1/organizations/${organizationId}/schedules?sort=starts_at&direction=desc`;
-    const seasonDetailsUrl = (seasonId) =>
-      `https://canlan2-api.sportninja.net/v1/schedules/${seasonId}/children/dropdown`;
-    const gamesUrl = (conferenceId, teamId) =>
-      `https://canlan2-api.sportninja.net/v1/schedules/${conferenceId}/games?exclude_cancelled_games=1&team_id=${teamId}&default=1`;
+      const schedulesUrl = `https://canlan2-api.sportninja.net/v1/organizations/${organizationId}/schedules?sort=starts_at&direction=desc`;
+      const seasonDetailsUrl = (seasonId) =>
+        `https://canlan2-api.sportninja.net/v1/schedules/${seasonId}/children/dropdown`;
+      const gamesUrl = (conferenceId, teamId) =>
+        `https://canlan2-api.sportninja.net/v1/schedules/${conferenceId}/games?exclude_cancelled_games=1&team_id=${teamId}&default=1`;
 
-    async function sendRequest(url) {
-      try {
-        const bearerToken = localStorage.getItem("session_token_iframe");
+      async function sendRequest(url) {
+        try {
+          const bearerToken = localStorage.getItem("session_token_iframe");
 
-        console.info(`fetching ${url}`);
+          console.debug(`fetching ${url}`);
 
-        const res = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${bearerToken}`,
-            "Content-Type": "application/json",
-          },
-        });
-
-        const responseBody = await res.json();
-
-        return responseBody?.data;
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    async function getGames() {
-      let games: Array<any> = [];
-
-      // The schedule just contains a list of each season
-      const schedules = await sendRequest(schedulesUrl);
-
-      for (let seasonName of seasonNames) {
-        const seasonId = schedules.find((item) => item.name === seasonName)?.id;
-
-        // dropdown contains current season, conference and team division info. Including team id
-        const currentSeasonDetailsUrl = seasonDetailsUrl(seasonId);
-        const seasonDetails = await sendRequest(currentSeasonDetailsUrl);
-
-        const conferenceId = seasonDetails
-          .find((item) => item.name === "Conference")
-          ?.schedules.find((s) => s.name === dayOfWeek)?.id;
-        let teamId;
-
-        // If your team, like ours, bounces around divisions. Find team across all divisions
-        seasonDetails
-          .find((item) => item.name === "Division")
-          ?.schedules.forEach((division) => {
-            division.teams?.forEach((team) => {
-              if (team.name === teamName) {
-                teamId = team.id;
-              }
-            });
+          const res = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${bearerToken}`,
+              "Content-Type": "application/json",
+            },
           });
 
-        const ourGamesUrl = gamesUrl(conferenceId, teamId);
-        const gamesForSeason = await sendRequest(ourGamesUrl);
-        games = [...games, ...gamesForSeason];
+          const responseBody = await res.json();
+
+          // Error gives { status, message }, otherwise we have { data }
+          return responseBody?.data;
+        } catch (err) {
+          console.error(err);
+        }
       }
 
-      return games;
-    }
+      async function getGames() {
+        let games: Array<any> = [];
 
-    return await getGames();
-  });
+        // The schedule just contains a list of each season
+        const schedules = await sendRequest(schedulesUrl);
+
+        for (let seasonName of seasonNames) {
+          const seasonId = schedules.find(
+            (item) => item.name === seasonName
+          )?.id;
+
+          // dropdown contains current season, conference and team division info. Including team id
+          const currentSeasonDetailsUrl = seasonDetailsUrl(seasonId);
+          const seasonDetails = await sendRequest(currentSeasonDetailsUrl);
+
+          if (!seasonDetails) {
+            console.debug(
+              "Season details not found. It's possible you're looking at a future season - skipping."
+            );
+            continue;
+          }
+
+          const conferenceId = seasonDetails
+            .find((item) => item.name === "Conference")
+            ?.schedules.find((s) => s.name === dayOfWeek)?.id;
+          let teamId;
+
+          // If your team, like ours, bounces around divisions. Find team across all divisions
+          seasonDetails
+            .find((item) => item.name === "Division")
+            ?.schedules.forEach((division) => {
+              division.teams?.forEach((team) => {
+                if (team.name === teamName) {
+                  teamId = team.id;
+                }
+              });
+            });
+
+          const ourGamesUrl = gamesUrl(conferenceId, teamId);
+          const gamesForSeason = await sendRequest(ourGamesUrl);
+          games = [...games, ...gamesForSeason];
+        }
+
+        return games;
+      }
+
+      return await getGames();
+    },
+    [teamName, dayOfWeek]
+  );
 
   const calendar = ical({ name: calendarName });
 
   games.forEach((game) => {
-    // console.info(game);
+    console.debug(game);
     const gameId = game.id;
     const startTime = new Date(game.starts_at);
     let endTime = new Date(game.starts_at);

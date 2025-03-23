@@ -1,8 +1,32 @@
 name: Playwright Tests
 on:
   workflow_dispatch:
+    inputs:
+      calendarName:
+        description: "Title of the calendar when viewed in a calendar app"
+        required: true
+        default: "ASHL Big City Boys"
+      iCalFileName:
+        description: "Name of the .ics file, only matters for the filename & url to share"
+        required: true
+        default: "V1.0.0"
+      scheduleBaseUrl:
+        description: "Entry point to start scraping the schedule"
+        required: true
+        default: "https://www.ashl.ca/stats-schedules/"
+      teamName:
+        description: "Exact team name as it appears on the schedule page"
+        required: true
+        default: "Big City Boys"
+      dayOfWeek:
+        description: "Day of the week to filter"
+        required: true
+        default: "Monday"
   schedule:
     - cron: "0 7 * * mon,wed,fri"
+
+env:
+  TZ: America/Toronto
 
 jobs:
   test:
@@ -19,6 +43,12 @@ jobs:
         run: npx playwright install --with-deps
       - name: Run Playwright tests
         run: npx playwright test get-games
+        env:
+          CALENDAR_NAME: ${{ github.event.inputs.calendarName }}
+          ICAL_FILE_NAME: ${{ github.event.inputs.iCalFileName }}
+          SCHEDULE_BASE_URL: ${{ github.event.inputs.scheduleBaseUrl }}
+          TEAM_NAME: ${{ github.event.inputs.teamName }}
+          DAY_OF_WEEK: ${{ github.event.inputs.dayOfWeek }}
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Auto-update ics changes
