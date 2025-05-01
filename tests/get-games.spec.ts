@@ -3,12 +3,12 @@ import ical from "ical-generator";
 import fs from "fs";
 
 test("grab auth token and fetch games through api", async ({ page }) => {
-  const calendarName = process.env.CALENDAR_NAME || "ASHL Big City Boys";
+  const calendarName = process.env.CALENDAR_NAME || "ASHL Milk Men";
   const iCalFileName = process.env.ICAL_FILE_NAME || "V1.0.0";
   const scheduleBaseUrl =
     process.env.SCHEDULE_BASE_URL || "https://www.ashl.ca/stats-schedules/";
 
-  const teamName = process.env.TEAM_NAME || "Big City Boys";
+  const teamName = process.env.TEAM_NAME || "Milk Men";
   const dayOfWeek = process.env.DAY_OF_WEEK || "Monday";
 
   await page.goto(scheduleBaseUrl);

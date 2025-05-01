@@ -5,7 +5,7 @@ on:
       calendarName:
         description: "Title of the calendar when viewed in a calendar app"
         required: true
-        default: "ASHL Big City Boys"
+        default: "ASHL Milk Men"
       iCalFileName:
         description: "Name of the .ics file, only matters for the filename & url to share"
         required: true
@@ -17,7 +17,7 @@ on:
       teamName:
         description: "Exact team name as it appears on the schedule page"
         required: true
-        default: "Big City Boys"
+        default: "Milk Men"
       dayOfWeek:
         description: "Day of the week to filter"
         required: true
