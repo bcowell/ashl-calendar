@@ -17,6 +17,12 @@ Run the scraper and create an .ics
 npx playwright test get-games
 ```
 
+or
+
+```
+npx playwright test get-games --ui
+```
+
 # IDEAS
 
 - whatsapp bot to post N days before game. Ask for attendance

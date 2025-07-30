@@ -43,6 +43,7 @@ test("grab auth token and fetch games through api", async ({ page }) => {
         "2024/25 Winter Playoffs",
         "2025 Summer",
         "2025 Summer Playoffs",
+        "2025/26 Winter",
       ];
 
       const schedulesUrl = `https://canlan2-api.sportninja.net/v1/organizations/${organizationId}/schedules?sort=starts_at&direction=desc`;
@@ -110,6 +111,14 @@ test("grab auth token and fetch games through api", async ({ page }) => {
                 }
               });
             });
+
+          // Might be looking at a future season, or our team is not found in division schedules
+          if (!teamId) {
+            console.error(
+              `Team "${teamName}" not found in division schedules for ${seasonName}.`
+            );
+            continue;
+          }
 
           const ourGamesUrl = gamesUrl(conferenceId, teamId);
           const gamesForSeason = await sendRequest(ourGamesUrl);
