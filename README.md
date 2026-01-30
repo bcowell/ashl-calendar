@@ -11,6 +11,8 @@ Runs on a weekly cron schedule that updates the .ics file through github-actions
 
 `npm i` or `yarn`
 
+`npx playwright install`
+
 Run the scraper and create an .ics
 
 ```

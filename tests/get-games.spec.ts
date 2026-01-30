@@ -146,7 +146,7 @@ test("grab auth token and fetch games through api", async ({ page }) => {
     const visitingTeam =
       game.visitingTeam?.name || game.visitingTeamSlot?.name_full;
     const venue = game.venue.name;
-    const facility = game.facility.name;
+    const facility = game.facility?.name || "";
     const streetAddress = game.venue.address.street_1;
     const city = game.venue.address.city;
     const province = game.venue.address.province.iso_3166_2;
