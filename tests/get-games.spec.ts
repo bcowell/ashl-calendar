@@ -44,6 +44,8 @@ test("grab auth token and fetch games through api", async ({ page }) => {
         "2025 Summer",
         "2025 Summer Playoffs",
         "2025/26 Winter",
+        "2025/26 Winter Playoffs",
+        "2026 Summer",
       ];
 
       const schedulesUrl = `https://canlan2-api.sportninja.net/v1/organizations/${organizationId}/schedules?sort=starts_at&direction=desc`;
