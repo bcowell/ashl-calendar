@@ -89,7 +89,7 @@ test("grab auth token and fetch games through api", async ({ page }) => {
   // ASHL > Ontario > Etobicoke -> redirects to current (or next season when in playoffs)
   await page.getByRole("button", { name: "ASHL" }).click();
   await page.getByRole("button", { name: "Ontario" }).click();
-  await page.getByRole("link", { name: "CWENCH Centre - Etobicoke" }).click();
+  await page.getByRole("link", { name: "Etobicoke" }).click();
 
   // Wait for session_token_iframe to be set in localStorage
   await page.waitForTimeout(3000);
