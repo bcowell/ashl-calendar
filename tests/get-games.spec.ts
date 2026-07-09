@@ -60,6 +60,11 @@ async function getGames(token: string, teamName: string, dayOfWeek: string) {
         });
       });
 
+    if (!conferenceId) {
+      console.debug(`No "${dayOfWeek}" conference found for ${seasonName} - skipping.`);
+      continue;
+    }
+
     // Might be looking at a future season, or our team is not found in division schedules
     if (!teamId) {
       console.error(
@@ -70,6 +75,10 @@ async function getGames(token: string, teamName: string, dayOfWeek: string) {
 
     const gamesForSeason = await sendRequest(gamesUrl(conferenceId, teamId), token);
     // console.debug(gamesForSeason);
+    if (!Array.isArray(gamesForSeason)) {
+      console.error(`Unexpected response for games in ${seasonName} - skipping.`);
+      continue;
+    }
     games = [...games, ...gamesForSeason.map((g: any) => ({ ...g, season_id: seasonId }))];
   }
 
