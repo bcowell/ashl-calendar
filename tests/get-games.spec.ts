@@ -7,8 +7,8 @@ const organizationId = "F3iSbnnOrSALJPRs"; // static, represents Etobicoke's are
 const schedulesUrl = `https://canlan2-api.sportninja.net/v1/organizations/${organizationId}/schedules?sort=starts_at&direction=desc`;
 const seasonDetailsUrl = (seasonId: string) =>
   `https://canlan2-api.sportninja.net/v1/schedules/${seasonId}/children/dropdown`;
-const gamesUrl = (conferenceId: string, teamId: string) =>
-  `https://canlan2-api.sportninja.net/v1/schedules/${conferenceId}/games?exclude_cancelled_games=1&team_id=${teamId}&default=1`;
+const gamesUrl = (scheduleId: string, teamId: string) =>
+  `https://canlan2-api.sportninja.net/v1/schedules/${scheduleId}/games?exclude_cancelled_games=1&team_id=${teamId}`;
 
 async function sendRequest(url: string, token: string) {
   console.debug(`fetching ${url}`);
@@ -18,6 +18,11 @@ async function sendRequest(url: string, token: string) {
       "Content-Type": "application/json",
     },
   });
+
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`${res.status} ${res.statusText} from ${url}`);
+  }
+
   const body = await res.json();
   return body?.data;
 }
@@ -43,38 +48,48 @@ async function getGames(token: string, teamName: string, dayOfWeek: string) {
       continue;
     }
 
-    const conferenceId = seasonDetails
-      .find((item: any) => item.name === "Conference")
-      ?.schedules.find((s: any) => s.name === dayOfWeek)?.id;
+    const divisions = seasonDetails.find((item: any) => item.name === "Division");
+    if (!divisions?.schedules?.length) {
+      console.error(`No division schedules found for ${seasonName} - skipping.`);
+      continue;
+    }
 
     let teamId: string | undefined;
+    let divisionId: string | undefined;
+    let divisionName: string | undefined;
 
     // If your team, like ours, bounces around divisions. Find team across all divisions
-    seasonDetails
-      .find((item: any) => item.name === "Division")
-      ?.schedules.forEach((division: any) => {
+    divisions.schedules.forEach((division: any) => {
         division.teams?.forEach((team: any) => {
           if (team.name === teamName) {
             teamId = team.id;
+          divisionId = division.id;
+          divisionName = division.name;
           }
         });
       });
 
-    if (!conferenceId) {
-      console.debug(`No "${dayOfWeek}" conference found for ${seasonName} - skipping.`);
-      continue;
-    }
-
     // Might be looking at a future season, or our team is not found in division schedules
-    if (!teamId) {
+    if (!teamId || !divisionId || !divisionName) {
       console.error(
         `Team "${teamName}" not found in division schedules for ${seasonName}.`
       );
       continue;
     }
 
-    const gamesForSeason = await sendRequest(gamesUrl(conferenceId, teamId), token);
+    // Division names are spelled inconsistently ("Men's" vs "Mens")
+    if (!divisionName.toLowerCase().startsWith(dayOfWeek.toLowerCase())) {
+      console.debug(
+        `${seasonName}: team plays in "${divisionName}", not ${dayOfWeek} - skipping.`
+      );
+      continue;
+    }
+
+    console.debug(`${seasonName}: found "${teamName}" in "${divisionName}".`);
+
+    const gamesForSeason = await sendRequest(gamesUrl(divisionId, teamId), token);
     // console.debug(gamesForSeason);
+
     if (!Array.isArray(gamesForSeason)) {
       console.error(`Unexpected response for games in ${seasonName} - skipping.`);
       continue;
@@ -101,7 +116,11 @@ test("grab auth token and fetch games through api", async ({ page }) => {
   await page.getByRole("link", { name: "Etobicoke" }).click();
 
   // Wait for session_token_iframe to be set in localStorage
-  await page.waitForTimeout(3000);
+  await page.waitForFunction(
+    () => !!localStorage.getItem("session_token_iframe"),
+    null,
+    { timeout: 10000 }
+  );
 
   const token = await page.evaluate(() =>
     localStorage.getItem("session_token_iframe")
@@ -151,9 +170,7 @@ test("grab auth token and fetch games through api", async ({ page }) => {
     });
   });
 
-  fs.writeFile(`./ics/${iCalFileName}.ics`, calendar.toString(), (err) => {
-    if (err) throw err;
-  });
+  fs.writeFileSync(`./ics/${iCalFileName}.ics`, calendar.toString());
 
   expect(games).toEqual(
     expect.arrayContaining([
