@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page, type Frame } from "@playwright/test";
 import ical from "ical-generator";
 import fs from "fs";
 
@@ -10,34 +10,97 @@ const seasonDetailsUrl = (seasonId: string) =>
 const gamesUrl = (scheduleId: string, teamId: string) =>
   `https://canlan2-api.sportninja.net/v1/schedules/${scheduleId}/games?exclude_cancelled_games=1&team_id=${teamId}`;
 
-async function sendRequest(url: string, token: string) {
-  console.debug(`fetching ${url}`);
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-  });
+type AuthHeaders = Record<string, string>;
+type RawResponse = { status: number; statusText: string; text: string };
+type Fetcher = (url: string) => Promise<RawResponse>;
 
-  if (!res.ok && res.status !== 404) {
+// Headers we must not replay by hand; the browser/HTTP client sets these itself
+const SKIP_HEADERS = new Set([
+  "host", "content-length", "connection", "cookie", "accept-encoding",
+  "te", "upgrade-insecure-requests", "priority",
+]);
+
+// Three ways of calling the API, from least to most "inside the browser".
+// We try each against the first endpoint and keep whichever one the API accepts.
+function buildFetchers(page: Page, frame: Frame | null, headers: AuthHeaders) {
+  const fetchers: Array<[string, Fetcher]> = [
+    [
+      "browser context (shares the page's cookies)",
+      async (url) => {
+        const res = await page.request.get(url, { headers });
+        return { status: res.status(), statusText: res.statusText(), text: await res.text() };
+      },
+    ],
+  ];
+  if (frame) {
+    fetchers.push([
+      "in-page fetch (same frame as the site's own calls)",
+      (url) =>
+        frame.evaluate(
+          async ({ url, headers }) => {
+            // Only send headers a page script is allowed to set, or CORS blocks the request
+            const safe: Record<string, string> = {};
+            for (const k of ["authorization", "accept", "content-type"]) if (headers[k]) safe[k] = headers[k];
+            const res = await fetch(url, { headers: safe, credentials: "include" });
+            return { status: res.status, statusText: res.statusText, text: await res.text() };
+          },
+          { url, headers }
+        ),
+    ]);
+  }
+  fetchers.push([
+    "node fetch (original approach)",
+    async (url) => {
+      const res = await fetch(url, { headers });
+      return { status: res.status, statusText: res.statusText, text: await res.text() };
+    },
+  ]);
+  return fetchers;
+}
+
+async function pickFetcher(fetchers: Array<[string, Fetcher]>, probeUrl: string) {
+  const attempts: string[] = [];
+  for (const [name, fetcher] of fetchers) {
+    try {
+      const res = await fetcher(probeUrl);
+      attempts.push(`${name}: ${res.status}`);
+      if (res.status >= 200 && res.status < 300) {
+        console.log(`API auth OK via ${name}`);
+        return fetcher;
+      }
+    } catch (err) {
+      attempts.push(`${name}: threw ${(err as Error).message.split("\n")[0]}`);
+    }
+  }
+  throw new Error(`Every way of calling the API was rejected:\n  ${attempts.join("\n  ")}`);
+}
+
+async function sendRequest(url: string, fetcher: Fetcher) {
+  console.debug(`fetching ${url}`);
+  const res = await fetcher(url);
+
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`${res.status} ${res.statusText} from ${url} - the API rejected our auth.`);
+  }
+
+  if ((res.status < 200 || res.status >= 300) && res.status !== 404) {
     throw new Error(`${res.status} ${res.statusText} from ${url}`);
   }
 
-  const text = await res.text();
   try {
-    return JSON.parse(text)?.data;
+    return JSON.parse(res.text)?.data;
   } catch {
     throw new Error(
-      `Non-JSON response (${res.status}) from ${url}: ${text.slice(0, 200)}`
+      `Non-JSON response (${res.status}) from ${url}: ${res.text.slice(0, 200)}`
     );
   }
 }
 
-async function getGames(token: string, teamName: string, dayOfWeek: string) {
+async function getGames(fetcher: Fetcher, teamName: string, dayOfWeek: string) {
   let games: Array<any> = [];
 
   // The schedule just contains a list of each season
-  const schedules = await sendRequest(schedulesUrl, token);
+  const schedules = await sendRequest(schedulesUrl, fetcher);
   if (!Array.isArray(schedules)) {
     throw new Error(`Unexpected schedules response: ${JSON.stringify(schedules)?.slice(0, 200)}`);
   }
@@ -55,7 +118,7 @@ async function getGames(token: string, teamName: string, dayOfWeek: string) {
     // One bad season (new/hidden/private schedule, API hiccup) shouldn't sink the whole calendar
     try {
       // dropdown contains current season, conference and team division info. Including team id
-      const seasonDetails = await sendRequest(seasonDetailsUrl(seasonId), token);
+      const seasonDetails = await sendRequest(seasonDetailsUrl(seasonId), fetcher);
 
       if (!seasonDetails) {
         console.debug(
@@ -103,8 +166,7 @@ async function getGames(token: string, teamName: string, dayOfWeek: string) {
 
       console.debug(`${seasonName}: found "${teamName}" in "${divisionName}".`);
 
-      const gamesForSeason = await sendRequest(gamesUrl(divisionId, teamId), token);
-      // console.debug(gamesForSeason);
+      const gamesForSeason = await sendRequest(gamesUrl(divisionId, teamId), fetcher);
 
       if (!Array.isArray(gamesForSeason)) {
         console.error(`Unexpected response for games in ${seasonName} - skipping.`);
@@ -129,26 +191,79 @@ test("grab auth token and fetch games through api", async ({ page }) => {
 
   await page.goto(scheduleBaseUrl);
 
+  // The schedule widget calls the stats API itself. Rather than guessing how it authenticates,
+  // record its API traffic and copy a request the API actually accepted.
+  // Log the path of each API call the site makes (query values redacted, just in case)
+  const shortUrl = (u: string) => {
+    const url = new URL(u);
+    const params = [...url.searchParams.keys()].join("&");
+    return `${url.pathname}${params ? `?${params}` : ""}`;
+  };
+  const siteCalls: string[] = [];
+  page.on("response", (res) => {
+    if (res.url().includes("sportninja.net/")) {
+      siteCalls.push(`${res.status()} ${res.request().method()} ${shortUrl(res.url())}`);
+    }
+  });
+  const okResponse = page
+    .waitForResponse(
+      (res) =>
+        res.url().includes("sportninja.net/v1/") &&
+        res.ok() && res.request().method() === "GET" && !res.url().includes("/v1/auth/") &&
+        !!res.request().headers()["authorization"],
+      { timeout: 30000 }
+    )
+    .catch(() => null);
+
   // ASHL > Ontario > Etobicoke -> redirects to current (or next season when in playoffs)
   await page.getByRole("button", { name: "ASHL" }).click();
   await page.getByRole("button", { name: "Ontario" }).click();
-  await page.getByRole("link", { name: "Etobicoke" }).click();
+  await page.getByRole("link", { name: "Etobicoke" }).first().click();
 
-  // Wait for session_token_iframe to be set in localStorage
-  await page.waitForFunction(
-    () => !!localStorage.getItem("session_token_iframe"),
-    null,
-    { timeout: 10000 }
-  );
+  const good = await okResponse;
+  // Give the widget a moment to finish any token refresh before we copy its headers
+  await page.waitForLoadState("networkidle").catch(() => {});
+  console.log(`Site's own API calls:\n  ${siteCalls.join("\n  ") || "none"}`);
 
-  const token = await page.evaluate(() =>
-    localStorage.getItem("session_token_iframe")
-  );
+  const headers: AuthHeaders = {};
+  let frame: Frame | null = null;
+  if (good) {
+    frame = good.frame();
+    const all = await good.request().allHeaders();
+    for (const [name, value] of Object.entries(all) as [string, string][]) {
+      if (!SKIP_HEADERS.has(name) && !name.startsWith(":")) headers[name] = value;
+    }
+  } else {
+    console.warn("Never saw a successful authenticated API call from the site - falling back to localStorage token.");
+    const token = await page
+      .waitForFunction(() => localStorage.getItem("session_token_iframe"), null, { timeout: 10000 })
+      .then((h) => h.jsonValue() as Promise<string | null>)
+      .catch(() => null);
+    if (token) headers["authorization"] = `Bearer ${token}`;
+  }
+
+  if (!headers["authorization"]) {
+    throw new Error("Could not find an auth token - the site's login flow has changed.");
+  }
+  // Log header names only; never print the token itself (Actions logs are visible to others)
+  console.log(`Replaying headers: ${Object.keys(headers).join(", ")}`);
+
+  // Diagnostic: does replaying the site's OWN successful call work? If yes, our auth is fine
+  // and it's our endpoint that's now off-limits. If no, the token can't be reused at all.
+  if (good) {
+    const replay = await page.request
+      .get(good.url(), { headers })
+      .then((r) => String(r.status()))
+      .catch((e) => `threw ${(e as Error).message.split("\n")[0]}`);
+    console.log(`Replay of site's own call ${shortUrl(good.url())} -> ${replay}`);
+  }
+
+  const fetcher = await pickFetcher(buildFetchers(page, frame, headers), schedulesUrl);
 
   const currentUrl = page.url();
   const scheduleBaseUrlResolved = currentUrl.split("#")[0];
 
-  const games = await getGames(token!, teamName, dayOfWeek);
+  const games = await getGames(fetcher, teamName, dayOfWeek);
 
   // Fail before touching the .ics so a bad run never wipes the published calendar
   expect(games.length, "No games found in any recent season - check the logs above").toBeGreaterThan(0);
