@@ -33,8 +33,8 @@ jobs:
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: lts/*
       - name: Install dependencies
@@ -49,6 +49,12 @@ jobs:
           SCHEDULE_BASE_URL: ${{ github.event.inputs.scheduleBaseUrl }}
           TEAM_NAME: ${{ github.event.inputs.teamName }}
           DAY_OF_WEEK: ${{ github.event.inputs.dayOfWeek }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-test-results
+          path: test-results/
+          retention-days: 7
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Auto-update ics changes
