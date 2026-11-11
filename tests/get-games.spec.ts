@@ -7,8 +7,11 @@ const organizationId = "F3iSbnnOrSALJPRs"; // static, represents Etobicoke's are
 const schedulesUrl = `https://canlan2-api.sportninja.net/v1/organizations/${organizationId}/schedules?sort=starts_at&direction=desc`;
 const seasonDetailsUrl = (seasonId: string) =>
   `https://canlan2-api.sportninja.net/v1/schedules/${seasonId}/children/dropdown`;
-const gamesUrl = (scheduleId: string, teamId: string) =>
-  `https://canlan2-api.sportninja.net/v1/schedules/${scheduleId}/games?exclude_cancelled_games=1&team_id=${teamId}`;
+// Query games at the season level, not the division level. Crossover games against teams from
+// another division (often on a different night) are filed under the *other* division's schedule,
+// so a division-scoped query silently misses them.
+const gamesUrl = (seasonId: string, teamId: string) =>
+  `https://canlan2-api.sportninja.net/v1/schedules/${seasonId}/games?exclude_cancelled_games=1&team_id=${teamId}`;
 
 type AuthHeaders = Record<string, string>;
 
@@ -108,7 +111,7 @@ async function getGames(page: Page, headers: AuthHeaders, teamName: string, dayO
 
       console.debug(`${seasonName}: found "${teamName}" in "${divisionName}".`);
 
-      const gamesForSeason = await sendRequest(page, gamesUrl(divisionId, teamId), headers);
+      const gamesForSeason = await sendRequest(page, gamesUrl(seasonId, teamId), headers);
 
       if (!Array.isArray(gamesForSeason)) {
         console.error(`Unexpected response for games in ${seasonName} - skipping.`);
