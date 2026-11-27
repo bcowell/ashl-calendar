@@ -23,7 +23,7 @@ on:
         required: true
         default: "Monday"
   schedule:
-    - cron: "0 7 * * mon,wed,fri"
+    - cron: "17 7 * * *" # daily, 03:17 Toronto (EDT) / 02:17 (EST)
 
 env:
   TZ: America/Toronto
